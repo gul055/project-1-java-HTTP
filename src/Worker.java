@@ -1,73 +1,77 @@
 import java.io.*;
 import java.net.*;
+import java.util.*;
 
-public class Worker implements Runnable{
+public class Worker implements Runnable {
 
     // socket
     private Socket clientSocket = null;
     // io streams
-    private DataInputStream clientInput = null;
-	private DataOutputStream clientOutput = null;
+    BufferedReader clientOutput = null;
+    BufferedOutputStream clientFileOutput = null;
+    PrintWriter clientWriter = null;
+    // doc root
+    private String doc_root = null;
+    // strings
+    private static final String CRLF_STRING = "\r\n";
+    // mime map
+    protected HashMap<String, String> mimeMap = null;
 
-    public Worker(Socket clientSocket) {
+    public Worker(Socket clientSocket, String doc_root, HashMap<String, String> mimeMap) {
         this.clientSocket = clientSocket;
+        this.doc_root = doc_root;
+        this.mimeMap = mimeMap;
+
+        // set timeout
+        try {
+            this.clientSocket.setSoTimeout(5000);
+        } catch (SocketException e) {
+            e.printStackTrace();
+        }
     }
 
     public void run() {
         try {
-            clientInput = new DataInputStream(clientSocket.getInputStream());
-			clientOutput = new DataOutputStream(clientSocket.getOutputStream());
-            // For dynamic size of input from client
-            ByteArrayOutputStream dynamicBuffer = new ByteArrayOutputStream();
+            // create io steams request handler
+            this.clientOutput = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+            this.clientFileOutput = new BufferedOutputStream(this.clientSocket.getOutputStream());
+            this.clientWriter = new PrintWriter(this.clientSocket.getOutputStream());
+            RequestHandler r = new RequestHandler(doc_root, mimeMap);
 
-            int readSize = 0;
-            byte[] readBuffer = new byte[1024];
-            String message;
+            // a line from the host
+            String line = null;
+            // a complete request from the host
+            String message = null;
 
-            // Question 1: How do you tell if it's the end of message or network delay? Trick here :)
-            // Question 2: How do you tell if it's the end of message or the client close the connection?
+            while(true) {
+                // keep reading lines
+                if((line = clientOutput.readLine()) != null) {
+                    // end of a complete request, build and handle the request
+                    if(line.equals("")) {
+                        message += CRLF_STRING;
+                        message = message.substring(4);
 
-            // Read the data from client until EOF is reached
-            while((readSize = clientInput.read(readBuffer, 0, 1024)) != -1) {
-                dynamicBuffer.write(readBuffer, 0, readSize);
+                        boolean stop = r.handleRequest(message);
+                        r.generateResponse(this.clientFileOutput, this.clientWriter);
+
+                        // if received 400 error code, close the connection;
+                        // if 200 or 404, keep looping
+                        if(stop) break;
+
+                        // reset message
+                        message = null;
+                    } else {
+                        message += line;
+                        message += CRLF_STRING;
+                    }
+                }
             }
 
-            // write everything read into a message string
-            message = dynamicBuffer.toString();
-
-            // split the message string into single requests
-            String[] requests = message.split("\r\n\r\n");
-
-            // handle each request with a request handler
-            for(int i = 0; i < requests.length; i++) {
-                new RequestHandler(clientSocket, message);
-            }
-
-
-            //     try {
-            //     // Let's see what got put into the buffer
-            //     System.out.println("Round: " + iterationCount + ", Size of data: " + readSize);
-            //     System.out.println("[Temp Buf]:" + new String(readBuffer, 0, readSize));
-
-            //     // You can use this dynamic buffer to store undeterministic yet long data from client
-            //     dynamicBuffer.write(readBuffer, 0, readSize);
-            //     dynamicBuffer.toByteArray();
-            //     System.out.println("[Dynamic Buf]: " + dynamicBuffer.toString());
-
-            //     // Echo back to client
-            //     clientOutput.write(readBuffer, 0, readSize);
-
-            //     } catch (Exception e) {
-            //         e.printStackTrace();
-            //     }
-
-            //     iterationCount += 1;
-            // }
-
-            clientInput.close();
+            // close all streams & socket, connection closed
             clientOutput.close();
+            clientFileOutput.close();
+            clientWriter.close();
             clientSocket.close();
-            // serverSocket.close();
 
         } catch (IOException e) {
             //report exception somewhere.

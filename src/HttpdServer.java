@@ -1,9 +1,10 @@
 import org.ini4j.*;
+import java.util.*;
+import java.io.*;
 
 // Logging related. Print statement might not be thread-safe.
 import java.util.logging.Level; 
 import java.util.logging.Logger; 
-import java.util.logging.*; 
 import java.net.*;
 
 public class HttpdServer {
@@ -15,15 +16,19 @@ public class HttpdServer {
 	protected Wini server_config;
 	protected int port;
 	protected String doc_root;
+	protected String mime;
 
 	// client sockets
 	private Socket clientSocket = null;
 	// server sockets
-    private ServerSocket serverSocket = null;
+	private ServerSocket serverSocket = null;
+	
+	// hashmap for mime map
+	protected HashMap<String, String> mimeMap = new HashMap<>();
 
 	private final static Logger LOGGER = Logger.getLogger(Logger.GLOBAL_LOGGER_NAME);
 
-	public HttpdServer(Wini server_config) {
+	public HttpdServer(Wini server_config) throws FileNotFoundException {
 		this.server_config = server_config;
 
 		this.port  = server_config.get("httpd", "port", int.class);
@@ -37,6 +42,15 @@ public class HttpdServer {
 			LOGGER.log(Level.SEVERE, "Failed to read doc_root from config file");
 			System.exit(EX_CONFIG);
 		}
+
+		this.mime = server_config.get("httpd", "mime_types", String.class);
+        File file = new File(this.mime);
+        Scanner s = new Scanner(file);
+        while (s.hasNextLine()) {
+            String d[] = s.nextLine().split("\\s+");
+            mimeMap.put(d[0],d[1]);
+		}
+		s.close();
 	}
 
 	public void launch() {
@@ -64,7 +78,7 @@ public class HttpdServer {
 				System.out.println("Accepted a client");
 
 				// Start a new thread to handle this connection
-				new Thread(new Worker(clientSocket)).start();
+				new Thread(new Worker(clientSocket, doc_root, mimeMap)).start();
 			}
 
 		} catch (SocketException socketException) {
